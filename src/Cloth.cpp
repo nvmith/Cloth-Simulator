@@ -46,6 +46,11 @@ void Cloth::satisfyConstraints()
     }
 }
 
+void Cloth::draw()
+{
+    //TODO: 구현 예정
+}
+
 void Cloth::initParticles()
 {
     particles.clear();
