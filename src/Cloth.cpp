@@ -1,11 +1,14 @@
 ﻿#include "Cloth.h"
 #include <glm/gtc/type_ptr.hpp>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <iomanip>
+#include <iostream>
 #include <cmath>
 
-// ===== Cloth 클래스 상수 정의 (inline 없이) =====
+namespace fs = std::filesystem;
+
 const float Cloth::kDamping = 0.99f;
 const int   Cloth::kConstraintIters = 8;
 const float Cloth::kCorrectionFactorStable = 0.22f;
@@ -14,7 +17,6 @@ const int   Cloth::kGravityWarmupFrames = 60;
 const float Cloth::kWindStrength = 0.0f;
 const glm::vec3 Cloth::kWindDir = glm::vec3(0.0f, 0.0f, 0.0f);
 
-// -------------------- ctor --------------------
 Cloth::Cloth(int width, int height, float spacing)
     : numWidth(width), numHeight(height), spacing(spacing)
 {
@@ -22,13 +24,92 @@ Cloth::Cloth(int width, int height, float spacing)
     initSprings();
 
     buildIndices(numWidth, numHeight);
-    // initGL()은 GL 컨텍스트 준비 이후(App 쪽)에서 호출
 }
 
-// -------------------- sim --------------------
+bool Cloth::exportOBJ(const std::string& objPath, const std::string& mtlName, const char* texPath, float uvScale)
+{
+    try {
+        fs::path objP = fs::path(objPath);
+        if (objP.has_parent_path()) {
+            std::error_code ec;
+            fs::create_directories(objP.parent_path(), ec);
+        }
+        fs::path mtlP = objP.parent_path() / mtlName;
+
+        computeNormals();
+
+        std::ofstream obj(objP, std::ios::out | std::ios::trunc);
+        if (!obj) return false;
+
+        std::string texFileOnly;
+        if (!mtlName.empty()) {
+            std::ofstream mtl(mtlP, std::ios::out | std::ios::trunc);
+            if (!mtl) return false;
+
+            mtl << "newmtl clothMat\n";
+            mtl << "Ka 0.000 0.000 0.000\n";
+            mtl << "Kd 1.000 1.000 1.000\n";
+            mtl << "Ks 0.020 0.020 0.020\n";
+            mtl << "Ns 10.0\n";
+
+            if (texPath && texPath[0] != '\0') {
+                texFileOnly = fs::path(texPath).filename().string();
+                mtl << "map_Kd -s " << uvScale << " " << uvScale << " 1 " << texFileOnly << "\n";
+            }
+        }
+
+        obj << "# cloth export\n";
+        if (!mtlName.empty()) obj << "mtllib " << mtlName << "\n";
+        obj << "usemtl clothMat\n";
+        obj << std::fixed << std::setprecision(6);
+
+        for (const auto& p : particles) {
+            obj << "v " << p.pos.x << " " << p.pos.y << " " << p.pos.z << "\n";
+        }
+
+        if (!uvs.empty()) {
+            for (const auto& t : uvs) {
+                obj << "vt " << (t.x * uvScale) << " " << (t.y * uvScale) << "\n";
+            }
+        }
+        else {
+            for (const auto& p : particles) {
+                obj << "vt " << (p.uv.x * uvScale) << " " << (p.uv.y * uvScale) << "\n";
+            }
+        }
+
+        for (const auto& p : particles) {
+            obj << "vn " << p.normal.x << " " << p.normal.y << " " << p.normal.z << "\n";
+        }
+
+        obj << "s off\n";
+
+        // f (indices: 0-base → 1-base)
+        for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+            const unsigned int a = indices[i] + 1;
+            const unsigned int b = indices[i + 1] + 1;
+            const unsigned int c = indices[i + 2] + 1;
+            obj << "f " << a << "/" << a << "/" << a << " "
+                << b << "/" << b << "/" << b << " "
+                << c << "/" << c << "/" << c << "\n";
+        }
+        
+        if (!texFileOnly.empty()) {
+            const fs::path src = fs::path(texPath);
+            const fs::path dst = objP.parent_path() / texFileOnly;
+            std::error_code ec;
+            fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        }
+
+        return true;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
 void Cloth::update(float deltaTime)
 {
-    // 중력 이징(초반 튐 완화)
     float t = 1.0f;
     if (frameCount < Cloth::kGravityWarmupFrames)
     {
@@ -38,7 +119,6 @@ void Cloth::update(float deltaTime)
 
     applyGravity(glm::vec3(0.0f, -9.8f * gravityScale, 0.0f));
 
-    // 선택: 바람
     if (Cloth::kWindStrength > 0.0f)
     {
         glm::vec3 wdir = (glm::length(Cloth::kWindDir) > 1e-6f)
@@ -51,17 +131,17 @@ void Cloth::update(float deltaTime)
         }
     }
 
-    // Verlet + damping
     for (int i = 0; i < static_cast<int>(particles.size()); i++)
     {
         particles[i].updateVerlet(deltaTime, Cloth::kDamping);
     }
 
-    // 제약 반복(수렴)
     for (int iter = 0; iter < Cloth::kConstraintIters; iter++)
     {
         satisfyConstraints();
     }
+
+    computeNormals();
 
     frameCount++;
 }
@@ -76,7 +156,6 @@ void Cloth::applyGravity(const glm::vec3& gravity)
 
 void Cloth::satisfyConstraints()
 {
-    // 초반엔 강하게, 이후엔 안정값
     float factor = (frameCount < Cloth::kGravityWarmupFrames)
         ? Cloth::kCorrectionFactorWarmup
         : Cloth::kCorrectionFactorStable;
@@ -102,13 +181,11 @@ void Cloth::satisfyConstraints()
     }
 }
 
-// -------------------- draw entry --------------------
 void Cloth::draw()
 {
     drawTriangles();
 }
 
-// -------------------- mesh & GL --------------------
 void Cloth::buildIndices(int w, int h)
 {
     gridW = w;
@@ -125,7 +202,6 @@ void Cloth::buildIndices(int w, int h)
             unsigned int i2 = i0 + w;
             unsigned int i3 = i2 + 1;
 
-            // CCW(반시계)로 두 개 삼각형
             indices.push_back(i0);
             indices.push_back(i1);
             indices.push_back(i2);
@@ -136,7 +212,6 @@ void Cloth::buildIndices(int w, int h)
         }
     }
 
-    // UV 생성
     uvs.resize(w * h);
     for (int y = 0; y < h; y++)
     {
@@ -154,22 +229,15 @@ void Cloth::initGL()
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
-    // 위치 VBO
     glGenBuffers(1, &vboPos);
     glBindBuffer(GL_ARRAY_BUFFER, vboPos);
-
-    std::vector<glm::vec3> posInit;
-    posInit.resize(particles.size());
+    std::vector<glm::vec3> posInit(particles.size());
     for (size_t i = 0; i < particles.size(); i++)
-    {
         posInit[i] = particles[i].pos;
-    }
     glBufferData(GL_ARRAY_BUFFER, posInit.size() * sizeof(glm::vec3), posInit.data(), GL_DYNAMIC_DRAW);
-
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
 
-    // UV VBO
     if (!uvs.empty())
     {
         glGenBuffers(1, &vboUV);
@@ -179,7 +247,13 @@ void Cloth::initGL()
         glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(glm::vec2), (void*)0);
     }
 
-    // EBO
+    glGenBuffers(1, &vboNormal);
+    glBindBuffer(GL_ARRAY_BUFFER, vboNormal);
+    std::vector<glm::vec3> normalsInit(particles.size(), glm::vec3(0.0f));
+    glBufferData(GL_ARRAY_BUFFER, normalsInit.size() * sizeof(glm::vec3), normalsInit.data(), GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+
     glGenBuffers(1, &ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
@@ -189,16 +263,27 @@ void Cloth::initGL()
 
 void Cloth::updateGPU()
 {
-    glBindBuffer(GL_ARRAY_BUFFER, vboPos);
-
-    static std::vector<glm::vec3> uploadBuf;
-    uploadBuf.resize(particles.size());
-    for (size_t i = 0; i < particles.size(); i++)
+    if (vboPos)
     {
-        uploadBuf[i] = particles[i].pos;
+        glBindBuffer(GL_ARRAY_BUFFER, vboPos);
+        static std::vector<glm::vec3> posBuf;
+        posBuf.resize(particles.size());
+        for (size_t i = 0; i < particles.size(); i++)
+            posBuf[i] = particles[i].pos;
+
+        glBufferSubData(GL_ARRAY_BUFFER, 0, posBuf.size() * sizeof(glm::vec3), posBuf.data());
     }
 
-    glBufferSubData(GL_ARRAY_BUFFER, 0, uploadBuf.size() * sizeof(glm::vec3), uploadBuf.data());
+    if (vboNormal)
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, vboNormal);
+        static std::vector<glm::vec3> nrmBuf;
+        nrmBuf.resize(particles.size());
+        for (size_t i = 0; i < particles.size(); i++)
+            nrmBuf[i] = particles[i].normal;
+
+        glBufferSubData(GL_ARRAY_BUFFER, 0, nrmBuf.size() * sizeof(glm::vec3), nrmBuf.data());
+    }
 }
 
 void Cloth::drawTriangles()
@@ -206,16 +291,11 @@ void Cloth::drawTriangles()
     glEnable(GL_DEPTH_TEST);
     glBindVertexArray(vao);
 
-    // 필요 시 와이어 체크
-    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices.size()), GL_UNSIGNED_INT, (void*)0);
 
-    // glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glBindVertexArray(0);
 }
 
-// -------------------- init helpers --------------------
 void Cloth::initParticles()
 {
     particles.clear();
@@ -233,7 +313,6 @@ void Cloth::initParticles()
 
             Particle p(pos);
 
-            // 윗변 좌/우 고정 (U자 자연스러운 처짐)
             if (y == 0 && (x == 0 || x == numWidth - 1))
             {
                 p.isFixed = true;
@@ -255,19 +334,19 @@ void Cloth::initSprings()
         {
             int current = getIndex(x, y);
 
-            // Structural (가로/세로)
+            // 가로/세로
             if (x < numWidth - 1)
                 springs.emplace_back(current, getIndex(x + 1, y), spacing);
             if (y < numHeight - 1)
                 springs.emplace_back(current, getIndex(x, y + 1), spacing);
 
-            // Shear (대각)
+            // 대각
             if (x < numWidth - 1 && y < numHeight - 1)
                 springs.emplace_back(current, getIndex(x + 1, y + 1), spacing * std::sqrt(2.0f));
             if (x > 0 && y < numHeight - 1)
                 springs.emplace_back(current, getIndex(x - 1, y + 1), spacing * std::sqrt(2.0f));
 
-            // Bend (2칸)
+            // 2칸
             if (x < numWidth - 2)
                 springs.emplace_back(current, getIndex(x + 2, y), spacing * 2.0f);
             if (y < numHeight - 2)
@@ -276,67 +355,26 @@ void Cloth::initSprings()
     }
 }
 
-// -------------------- Export OBJ --------------------
-bool Cloth::exportOBJ(const char* objPath, const char* mtlName, const char* texName) const
+void Cloth::computeNormals()
 {
-    std::ofstream ofs(objPath);
-    if (!ofs.is_open())
+    for (auto& p : particles) p.normal = glm::vec3(0.0f);
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
     {
-        return false;
+        unsigned int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+        const glm::vec3& p0 = particles[i0].pos;
+        const glm::vec3& p1 = particles[i1].pos;
+        const glm::vec3& p2 = particles[i2].pos;
+
+        glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
+        if (glm::dot(n, n) > 1e-12f) n = glm::normalize(n);
+
+        particles[i0].normal += n;
+        particles[i1].normal += n;
+        particles[i2].normal += n;
     }
-
-    std::string mtlFile = mtlName ? mtlName : "cloth.mtl";
-    ofs << "mtllib " << mtlFile << "\n";
-    ofs << "o Cloth\n";
-
-    // v
-    for (const auto& p : particles)
-    {
-        ofs << "v " << std::fixed << std::setprecision(6)
-            << p.pos.x << " " << p.pos.y << " " << p.pos.z << "\n";
-    }
-    // vt
-    for (const auto& t : uvs)
-    {
-        ofs << "vt " << std::fixed << std::setprecision(6)
-            << t.x << " " << (1.0f - t.y) << "\n"; // Unity 편의상 V 뒤집기
-    }
-
-    ofs << "usemtl clothMat\n";
-    ofs << "s off\n";
-
-    // f (OBJ는 1-based index, v/vt 동일 인덱스 사용)
-    for (size_t i = 0; i < indices.size(); i += 3)
-    {
-        unsigned int i0 = indices[i + 0] + 1;
-        unsigned int i1 = indices[i + 1] + 1;
-        unsigned int i2 = indices[i + 2] + 1;
-
-        ofs << "f "
-            << i0 << "/" << i0 << " "
-            << i1 << "/" << i1 << " "
-            << i2 << "/" << i2 << "\n";
-    }
-
-    ofs.close();
-
-    // .mtl 생성
-    std::string mtlPath = std::string(objPath);
-    size_t slash = mtlPath.find_last_of("/\\");
-    std::string dir = (slash == std::string::npos) ? "" : mtlPath.substr(0, slash + 1);
-    std::ofstream mtl(dir + mtlFile);
-    if (mtl.is_open())
-    {
-        mtl << "newmtl clothMat\n";
-        mtl << "Kd 1.000000 1.000000 1.000000\n";
-        if (texName && std::string(texName).size() > 0)
-        {
-            mtl << "map_Kd " << texName << "\n";
-        }
-        mtl.close();
-    }
-
-    return true;
+    for (auto& p : particles)
+        p.normal = (glm::dot(p.normal, p.normal) > 1e-12f) ? glm::normalize(p.normal) : glm::vec3(0, 0, 1);
 }
 
 void Cloth::setParticlePos(int idx, const glm::vec3& p, bool movePrev)

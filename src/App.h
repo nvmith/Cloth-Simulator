@@ -32,4 +32,10 @@ private:
     // 내부 동작
     void processInput(float dt);
     glm::vec3 screenToWorldOnPlane(double sx, double sy, float planeZ);
+
+    unsigned int clothTex = 0;
+    float modelAngle = 0.0f;
+
+    float texScale = 2.0f;
+    std::string currentTexPath = "textures/blue_camo_pattern.png";
 };

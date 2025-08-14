@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <vector>
+#include <string>
 #include <glm/glm.hpp>
 #include <glad/glad.h>
 
@@ -9,11 +10,14 @@ struct Particle
     glm::vec3 pos;
     glm::vec3 prevPos;
     glm::vec3 acceleration;
+    glm::vec3 restPos;
     bool isFixed = false;
+    glm::vec2 uv;
 
-    Particle(const glm::vec3& position)
-        : pos(position), prevPos(position), acceleration(0.0f)
-    {
+    glm::vec3 normal = glm::vec3(0.0f);
+
+    Particle(const glm::vec3& p)
+        : pos(p), prevPos(p), restPos(p), acceleration(0.0f) {
     }
 
     void applyForce(const glm::vec3& force)
@@ -22,7 +26,6 @@ struct Particle
             acceleration += force;
     }
 
-    // Verlet + Damping
     void updateVerlet(float deltaTime, float damping)
     {
         if (isFixed)
@@ -59,10 +62,8 @@ public:
     int leftAnchorIndex() const { return getIndex(0, 0); }
     int rightAnchorIndex() const { return getIndex(numWidth - 1, 0); }
 
-    // 고정 입자 위치를 강제로 세팅 (prevPos도 같이 옮겨서 튐 방지)
     void setParticlePos(int idx, const glm::vec3& p, bool movePrev = true);
 
-    // ---- 시뮬레이션 튜닝값 (선언만; 값은 Cloth.cpp에서 정의) ----
     static const float kDamping;
     static const int   kConstraintIters;
     static const float kCorrectionFactorStable;
@@ -85,13 +86,58 @@ public:
     void updateGPU();
     void drawTriangles();
 
-    // Export(OBJ) — Unity 용
-    bool exportOBJ(const char* objPath, const char* mtlName, const char* texName) const;
+    // Export(OBJ)
+    bool exportOBJ(const std::string& objPath, const std::string& mtlName, const char* texPath, float uvScale = 1.0f);
 
     // Accessors
     const std::vector<Particle>& getParticles() const { return particles; }
     int getWidth() const { return numWidth; }
     int getHeight() const { return numHeight; }
+
+    void computeNormals();
+
+    bool isParticleFixed(int idx) const
+    {
+        return (idx >= 0 && idx < (int)particles.size()) ? particles[idx].isFixed : false;
+    }
+    void setParticleFixed(int idx, bool fixed)
+    {
+        if (idx < 0 || idx >= (int)particles.size()) return;
+        particles[idx].isFixed = fixed;
+        if (fixed) particles[idx].prevPos = particles[idx].pos;
+    }
+    void toggleParticleFixed(int idx)
+    {
+        setParticleFixed(idx, !isParticleFixed(idx));
+    }
+
+    void clearAllFixed()
+    {
+        for (auto& p : particles)
+            p.isFixed = false;
+    }
+
+    void resetToRest()
+    {
+        for (auto& p : particles)
+        {
+            p.pos = p.prevPos = p.restPos;
+            p.acceleration = glm::vec3(0.0f);
+        }
+        resetInitialFixed();
+    }
+
+    void resetInitialFixed()
+    {
+        for (auto& p : particles)
+            p.isFixed = false;
+
+        int L = 0;
+        particles[L].isFixed = true;
+
+        int R = getWidth() - 1;
+        particles[R].isFixed = true;
+    }
 
 private:
     // Grid
@@ -101,7 +147,7 @@ private:
 
     // Data
     std::vector<Particle> particles;
-    std::vector<Spring>   springs;    // structural + shear + bend(2-step)
+    std::vector<Spring>   springs;
 
     // Mesh (indices / uvs)
     std::vector<unsigned int> indices;
@@ -114,6 +160,7 @@ private:
     unsigned int vboPos = 0;
     unsigned int ebo = 0;
     unsigned int vboUV = 0;
+    unsigned int vboNormal = 0;
 
     // Sim state
     int frameCount = 0;
