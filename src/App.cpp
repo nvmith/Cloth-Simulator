@@ -59,6 +59,8 @@ bool App::init()
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE); // 천 양면 보이게 (옵션)
     glEnable(GL_FRAMEBUFFER_SRGB);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int w, int h) {
         glViewport(0, 0, w, h);
@@ -72,25 +74,56 @@ bool App::init()
             double mx, my; glfwGetCursorPos(win, &mx, &my);
             glm::vec3 hit = g_app->screenToWorldOnPlane(mx, my, 0.0f);
 
+            // 코너(좌상단, 우상단) 우선 히트테스트
             const auto& P = g_app->cloth.getParticles();
-            int nearest = -1; float best = 1e9f;
-            for (int i = 0; i < (int)P.size(); i++)
-            {
-                float d = glm::length(P[i].pos - hit);
-                if (d < best) { best = d; nearest = i; }
-            }
+            int w = g_app->cloth.getWidth();
+            int tl = 0;
+            int tr = w - 1;
 
-            g_app->dragAnchor = nearest;
-            g_app->dragging = (nearest >= 0);
+            // spacing 추정: (0,0)~(1,0) 거리. w<2면 안전값 사용
+            float baseSpacing = (w >= 2) ? glm::length(P[1].pos - P[0].pos) : 0.25f;
+            float r = baseSpacing * g_app->cornerHitScale;
+
+            float d0 = glm::length(P[tl].pos - hit);
+            float d1 = glm::length(P[tr].pos - hit);
+
+            if (std::min(d0, d1) <= r)
+            {
+                g_app->dragMode = App::DragMode::Corner;
+                g_app->dragCorner = (d0 <= d1 ? tl : tr);
+                g_app->dragAnchor = g_app->dragCorner;  // 편의상 동일 인덱스 기록
+                g_app->dragging = true;
+
+                g_app->cloth.setParticlePos(g_app->dragCorner, hit, /*movePrev=*/true);
+            }
+            else
+            {
+                // 일반 파티클 드래그 (기존 로직)
+                int nearest = -1; float best = 1e9f;
+                for (int i = 0; i < (int)P.size(); i++)
+                {
+                    float d = glm::length(P[i].pos - hit);
+                    if (d < best) { best = d; nearest = i; }
+                }
+                g_app->dragMode = App::DragMode::Particle;
+                g_app->dragAnchor = nearest;
+                g_app->dragging = (nearest >= 0);
+            }
         }
         else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         {
+            // 상태 리셋 (코너/일반 공통)
             g_app->dragging = false;
             g_app->dragAnchor = -1;
+            g_app->dragCorner = -1;
+            g_app->dragMode = App::DragMode::None;
         }
         });
 
     clothShader = new Shader("shaders/cloth.vert", "shaders/cloth.frag");
+    flashShader = new Shader("shaders/flash.vert", "shaders/flash.frag");
+    glGenVertexArrays(1, &flashVAO);
+
 
     cloth.buildIndices(cloth.getWidth(), cloth.getHeight());
     cloth.initGL();
@@ -110,22 +143,40 @@ void App::run()
         float dt = now - lastTime;
         lastTime = now;
 
+        if (freezeTimer > 0.0f) freezeTimer = std::max(0.0f, freezeTimer - dt);
+
         processInput(dt);
 
         // 드래그
-        if (dragging && dragAnchor >= 0 && !cloth.isParticleFixed(dragAnchor)) {
+        if (freezeTimer <= 0.0f && dragging)
+        {
             double mx, my; glfwGetCursorPos(window, &mx, &my);
             glm::vec3 p = screenToWorldOnPlane(mx, my, 0.0f);
-            cloth.setParticlePos(dragAnchor, p, true);
+
+            if (dragMode == DragMode::Corner && dragCorner >= 0)
+            {
+                cloth.setParticlePos(dragCorner, p, true);
+            }
+            else if (dragMode == DragMode::Particle && dragAnchor >= 0 && !cloth.isParticleFixed(dragAnchor))
+            {
+                cloth.setParticlePos(dragAnchor, p, true);
+            }
         }
 
-        cloth.update(dt);
+        if (freezeTimer <= 0.0f) 
+        {
+            cloth.update(dt);
+        }
         cloth.updateGPU();
+
+        flash = std::max(0.0f, flash - dt * 6.0f);
 
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         clothShader->use();
+
+        clothShader->setFloat("uFlash", flash);
 
         if (clothTex != 0) {
             glActiveTexture(GL_TEXTURE0);
@@ -170,6 +221,19 @@ void App::run()
 
         cloth.drawTriangles();
 
+        float overlay = flash;
+        if (freezeTimer > 0.0f) overlay = std::max(overlay, 0.12f);
+
+        if (overlay > 0.0f) {
+            glDisable(GL_DEPTH_TEST);
+            flashShader->use();
+            flashShader->setFloat("uFlash", overlay);
+            glBindVertexArray(flashVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindVertexArray(0);
+            glEnable(GL_DEPTH_TEST);
+        }
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -210,6 +274,9 @@ void App::processInput(float dt)
         cloth.exportOBJ("out/cloth.obj", "cloth.mtl",
             (clothTex != 0 ? currentTexPath.c_str() : nullptr),
             texScale);
+        g_app->flash = 1.0f;
+        g_app->freezeTimer = g_app->captureHoldSec;
+        g_app->dragging = false;
         char title[128];
         snprintf(title, sizeof(title), "Cloth Simulator  |  tile=%.2f", texScale);
         glfwSetWindowTitle(window, title);

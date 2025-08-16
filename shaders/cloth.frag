@@ -31,6 +31,5 @@ void main()
 
     vec3 color = base * (uAmbient + diff * (1.0 - uAmbient))
                + vec3(1.0) * (uSpecularStrength * spec);
-
     FragColor = vec4(color, 1.0);
 }
