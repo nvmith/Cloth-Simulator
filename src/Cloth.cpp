@@ -9,6 +9,7 @@
 
 namespace fs = std::filesystem;
 
+// 시뮬레이션 상수 정의
 const float Cloth::kDamping = 0.99f;
 const int   Cloth::kConstraintIters = 8;
 const float Cloth::kCorrectionFactorStable = 0.22f;
@@ -17,6 +18,7 @@ const int   Cloth::kGravityWarmupFrames = 60;
 const float Cloth::kWindStrength = 0.0f;
 const glm::vec3 Cloth::kWindDir = glm::vec3(0.0f, 0.0f, 0.0f);
 
+// Cloth 생성자
 Cloth::Cloth(int width, int height, float spacing)
     : numWidth(width), numHeight(height), spacing(spacing)
 {
@@ -26,6 +28,18 @@ Cloth::Cloth(int width, int height, float spacing)
     buildIndices(numWidth, numHeight);
 }
 
+Cloth::~Cloth() { destroyGL(); }
+
+void Cloth::destroyGL()
+{
+    if (ebo) { glDeleteBuffers(1, &ebo); ebo = 0; }
+    if (vboNormal) { glDeleteBuffers(1, &vboNormal); vboNormal = 0; }
+    if (vboUV) { glDeleteBuffers(1, &vboUV); vboUV = 0; }
+    if (vboPos) { glDeleteBuffers(1, &vboPos); vboPos = 0; }
+    if (vao) { glDeleteVertexArrays(1, &vao); vao = 0; }
+}
+
+// OBJ 파일로 천 시뮬레이션 결과 내보내기
 bool Cloth::exportOBJ(const std::string& objPath, const std::string& mtlName, const char* texPath, float uvScale)
 {
     try {
@@ -84,7 +98,7 @@ bool Cloth::exportOBJ(const std::string& objPath, const std::string& mtlName, co
 
         obj << "s off\n";
 
-        // f (indices: 0-base → 1-base)
+        // f (indices: 0-base -> 1-base)
         for (size_t i = 0; i + 2 < indices.size(); i += 3) {
             const unsigned int a = indices[i] + 1;
             const unsigned int b = indices[i + 1] + 1;
@@ -108,6 +122,7 @@ bool Cloth::exportOBJ(const std::string& objPath, const std::string& mtlName, co
     }
 }
 
+// 매 프레임 시뮬레이션을 업데이트
 void Cloth::update(float deltaTime)
 {
     float t = 1.0f;
@@ -146,6 +161,7 @@ void Cloth::update(float deltaTime)
     frameCount++;
 }
 
+// 모든 파티클에 중력을 적용
 void Cloth::applyGravity(const glm::vec3& gravity)
 {
     for (int i = 0; i < static_cast<int>(particles.size()); i++)
@@ -154,6 +170,7 @@ void Cloth::applyGravity(const glm::vec3& gravity)
     }
 }
 
+// 제약 조건(스프링)을 만족
 void Cloth::satisfyConstraints()
 {
     float factor = (frameCount < Cloth::kGravityWarmupFrames)
@@ -181,11 +198,13 @@ void Cloth::satisfyConstraints()
     }
 }
 
+// 삼각형 메시를 렌더링
 void Cloth::draw()
 {
     drawTriangles();
 }
 
+// 인덱스 버퍼와 UV 데이터 생성
 void Cloth::buildIndices(int w, int h)
 {
     gridW = w;
@@ -224,6 +243,7 @@ void Cloth::buildIndices(int w, int h)
     }
 }
 
+// OpenGL 관련 버퍼 초기화
 void Cloth::initGL()
 {
     glGenVertexArrays(1, &vao);
@@ -261,6 +281,7 @@ void Cloth::initGL()
     glBindVertexArray(0);
 }
 
+// GPU의 VBO 데이터 업데이트
 void Cloth::updateGPU()
 {
     if (vboPos)
@@ -286,6 +307,7 @@ void Cloth::updateGPU()
     }
 }
 
+// 삼각형 메시 렌더링
 void Cloth::drawTriangles()
 {
     glEnable(GL_DEPTH_TEST);
@@ -296,6 +318,7 @@ void Cloth::drawTriangles()
     glBindVertexArray(0);
 }
 
+// 파티클 그리드 초기화
 void Cloth::initParticles()
 {
     particles.clear();
@@ -323,6 +346,7 @@ void Cloth::initParticles()
     }
 }
 
+// 스프링 제약 조건들 초기화
 void Cloth::initSprings()
 {
     springs.clear();
@@ -355,6 +379,7 @@ void Cloth::initSprings()
     }
 }
 
+// 각 파티클의 노멀 벡터를 계산
 void Cloth::computeNormals()
 {
     for (auto& p : particles) p.normal = glm::vec3(0.0f);
@@ -377,6 +402,7 @@ void Cloth::computeNormals()
         p.normal = (glm::dot(p.normal, p.normal) > 1e-12f) ? glm::normalize(p.normal) : glm::vec3(0, 0, 1);
 }
 
+// 특정 파티클의 위치를 설정
 void Cloth::setParticlePos(int idx, const glm::vec3& p, bool movePrev)
 {
     if (idx < 0 || idx >= (int)particles.size()) return;

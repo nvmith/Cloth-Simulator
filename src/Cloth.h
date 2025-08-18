@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glad/glad.h>
 
+// 파티클 구조체
 struct Particle
 {
     glm::vec3 pos;
@@ -20,12 +21,14 @@ struct Particle
         : pos(p), prevPos(p), restPos(p), acceleration(0.0f) {
     }
 
+    // 파티클에 힘을 적용합니다.
     void applyForce(const glm::vec3& force)
     {
         if (!isFixed)
             acceleration += force;
     }
 
+    // 베를레(Verlet) 통합을 사용하여 위치를 업데이트합니다.
     void updateVerlet(float deltaTime, float damping)
     {
         if (isFixed)
@@ -40,6 +43,7 @@ struct Particle
     }
 };
 
+// 스프링 구조체
 struct Spring
 {
     int p1, p2;
@@ -55,12 +59,17 @@ class Cloth
 {
 public:
     Cloth(int width, int height, float spacing);
+    ~Cloth();
+    void destroyGL();
 
+    // 앵커(고정점) 인덱스 접근자
     int leftAnchorIndex() const { return getIndex(0, 0); }
     int rightAnchorIndex() const { return getIndex(numWidth - 1, 0); }
 
+    // 파티클 위치 설정
     void setParticlePos(int idx, const glm::vec3& p, bool movePrev = true);
 
+    // 시뮬레이션 상수
     static const float kDamping;
     static const int   kConstraintIters;
     static const float kCorrectionFactorStable;
@@ -69,30 +78,32 @@ public:
     static const float kWindStrength;
     static const glm::vec3 kWindDir;
 
-    // Simulation
+    // 시뮬레이션
     void update(float deltaTime);
     void applyGravity(const glm::vec3& gravity);
     void satisfyConstraints();
 
-    // Render entry
+    // 렌더링
     void draw();
 
-    // GPU helpers
+    // GPU 헬퍼
     void buildIndices(int w, int h);
     void initGL();
     void updateGPU();
     void drawTriangles();
 
-    // Export(OBJ)
+    // OBJ 익스포트
     bool exportOBJ(const std::string& objPath, const std::string& mtlName, const char* texPath, float uvScale = 1.0f);
 
-    // Accessors
+    // 접근자
     const std::vector<Particle>& getParticles() const { return particles; }
     int getWidth() const { return numWidth; }
     int getHeight() const { return numHeight; }
 
+    // 노멀 계산
     void computeNormals();
 
+    // 고정 파티클 관리
     bool isParticleFixed(int idx) const
     {
         return (idx >= 0 && idx < (int)particles.size()) ? particles[idx].isFixed : false;
@@ -107,13 +118,11 @@ public:
     {
         setParticleFixed(idx, !isParticleFixed(idx));
     }
-
     void clearAllFixed()
     {
         for (auto& p : particles)
             p.isFixed = false;
     }
-
     void resetToRest()
     {
         for (auto& p : particles)
@@ -123,7 +132,6 @@ public:
         }
         resetInitialFixed();
     }
-
     void resetInitialFixed()
     {
         for (auto& p : particles)
@@ -137,32 +145,32 @@ public:
     }
 
 private:
-    // Grid
+    // 그리드 정보
     int numWidth;
     int numHeight;
     float spacing;
 
-    // Data
+    // 데이터
     std::vector<Particle> particles;
     std::vector<Spring>   springs;
 
-    // Mesh (indices / uvs)
+    // 메시 (인덱스/UV)
     std::vector<unsigned int> indices;
     std::vector<glm::vec2>    uvs;
     int gridW = 0;
     int gridH = 0;
 
-    // GL handles
+    // GL 핸들
     unsigned int vao = 0;
     unsigned int vboPos = 0;
     unsigned int ebo = 0;
     unsigned int vboUV = 0;
     unsigned int vboNormal = 0;
 
-    // Sim state
+    // 시뮬레이션 상태
     int frameCount = 0;
 
-    // Utils
+    // 유틸리티
     int getIndex(int x, int y) const { return y * numWidth + x; }
     void initParticles();
     void initSprings();

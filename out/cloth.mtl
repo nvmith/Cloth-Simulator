@@ -3,4 +3,4 @@ Ka 0.000 0.000 0.000
 Kd 1.000 1.000 1.000
 Ks 0.020 0.020 0.020
 Ns 10.0
-map_Kd -s 2 2 1 blue_camo_pattern.png
+map_Kd -s 1 1 1 generated.png
