@@ -7,6 +7,10 @@
 #include "Camera.h"
 #include "Shader.h"
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+
 class App
 {
 public:
@@ -37,7 +41,8 @@ private:
     float    cornerHitScale = 2.0f;
 
     // 내부 동작
-    void generateAndLoadTextureFromPrompt(const std::string& prompt);
+    void generateAndLoadTextureFromPrompt(const std::string& prompt,
+        const std::string& negative);
     void processInput(float dt);
     glm::vec3 screenToWorldOnPlane(double sx, double sy, float planeZ);
 
@@ -60,30 +65,15 @@ private:
     float freezeTimer = 0.0f;
     float captureHoldSec = 1.5f;
 
-    // App.h (private: 영역에 추가)
-    bool enteringPrompt = false; // 프롬프트 입력 모드 on/off
-    std::string promptBuffer; // 사용자가 타이핑한 문자열
-
-    // 키 에지 검출용
-    bool prevEnter = false, prevBackspace = false, prevI = false;
-    int  prevEscKey = GLFW_RELEASE;
-    bool escBlockUntilRelease = false; // ESC로 입력모드 종료 직후, 키 떼질 때까지 종료 차단
-
-    // 붙여넣기 에지 검출용
-    bool prevV = false;
-    bool prevInsert = false;
-
-    // 문자열 통째로 추가 (UTF-8 그대로)
-    void appendUTF8String(const std::string& s);
-
     // 실행 중 재생성(G)용 마지막 프롬프트
-    std::string lastPrompt = "blue camo pattern, seamless, repeating, tileable, soft textile";
-
-    // 유니코드 -> UTF-8 append / backspace
-    void appendUTF8(unsigned int cp);
-    void backspaceUTF8();
+    std::string lastPrompt;
+    std::string lastNegPrompt;
 
     // 마지막 이미지 리로드
     void reloadTexture(const std::string& path);
 
+    bool imguiEnabled = true;
+    const char* imguiGlslVersion = "#version 330"; // OpenGL 3.3 core
+
+    void runPatternGen(const char* prompt);
 };

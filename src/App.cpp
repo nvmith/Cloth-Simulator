@@ -20,6 +20,50 @@ App::App(int width, int height)
     g_app = this;
 }
 
+struct PatternPreset {
+    const char* label;   // 드롭다운에 보일 이름
+    const char* seed;    // 프롬프트에 들어갈 패턴 묘사
+};
+
+static PatternPreset kPatternPresets[] = {
+    {"Camo (classic)",        "camouflage pattern, irregular organic blobs"},
+    {"Camo (digital)",        "digital camo pattern, pixelated square blotches"},
+    {"Check (checkerboard)",  "checkerboard check pattern, high-contrast squares"},
+    {"Check (gingham)",       "gingham check pattern, small even checks"},
+    {"Check (buffalo)",       "buffalo check pattern, large bold checks"},
+    {"Plaid / Tartan",        "plaid tartan pattern, crossing stripes"},
+    {"Houndstooth",           "houndstooth pattern, broken checks"},
+    {"Windowpane",            "windowpane check pattern, thin grid lines"},
+    {"Argyle",                "argyle diamond pattern"},
+    {"Stripes (vertical)",    "vertical striped pattern, parallel lines"},
+    {"Stripes (horizontal)",  "horizontal striped pattern, parallel lines"},
+    {"Stripes (diagonal)",    "diagonal striped pattern, slanted lines"},
+    {"Pinstripe",             "pinstripe pattern, ultra thin stripes"},
+    {"Polka dot",             "polka dot pattern, round dots"},
+    {"Chevron",               "chevron zigzag pattern"},
+    {"Herringbone",           "herringbone pattern, V-shaped twill"},
+    {"Geometric tessellation","geometric tessellation pattern, repeating tiles"},
+    {"Paisley",               "paisley pattern, teardrop motifs"},
+    {"Damask",                "damask ornamental pattern, symmetric flourishes"},
+    {"Animal (leopard)",      "leopard print pattern, rosettes"},
+    {"Animal (zebra)",        "zebra print pattern, high-contrast stripes"},
+    {"Animal (snakeskin)",    "snakeskin scale pattern"}
+};
+
+static const char* kDensityLabels[] = { "Sparse", "Medium", "Dense" };
+static const char* kDensityWords[] = {
+    "sparse, spaced out motifs, large negative space",   // 배경 많이 보이게
+    "balanced density, evenly spaced",                   // 중간
+    "dense coverage, tighter spacing"                    // 빽빽
+};
+
+static const char* kDistributionLabels[] = { "Scattered", "Grid-aligned", "Random jittered" };
+static const char* kDistributionWords[] = {
+    "scattered, non-overlapping, evenly spaced",
+    "grid-aligned, uniform spacing, non-overlapping",
+    "randomized jitter, separated, non-overlapping"
+};
+
 unsigned int App::loadTexture2D(const char* path, bool srgb)
 {
     int w, h, comp;
@@ -75,7 +119,7 @@ bool App::init()
         });
 
     glfwSetMouseButtonCallback(window, [](GLFWwindow* win, int button, int action, int) {
-        if (g_app->enteringPrompt) return; // 입력 모드
+        if (ImGui::GetIO().WantCaptureMouse) return;
         if (g_app->freezeTimer > 0.0f) return;
 
         auto& cloth = g_app->cloth;
@@ -103,7 +147,7 @@ bool App::init()
 
         auto nearestCorner = [&](int& outIdx, float& outDist) {
             outIdx = -1; outDist = 1e9f;
-            for (int i = 0; i < 4; ++i) {
+            for (int i = 0; i < 4; i++) {
                 int idx = cornerIndices[i];
                 float d = glm::length(P[idx].pos - hit);
                 if (d < outDist) { outDist = d; outIdx = idx; }
@@ -172,16 +216,13 @@ bool App::init()
         }
         });
 
-    glfwSetCharCallback(window, [](GLFWwindow*, unsigned int codepoint) {
-        if (g_app && g_app->enteringPrompt) {
-            g_app->appendUTF8(codepoint);
-            char title[2048];
-            std::snprintf(title, sizeof(title),
-                "Cloth Simulator  |  Prompt: %s  (Enter=Generate, Esc=Cancel)",
-                g_app->promptBuffer.c_str());
-            glfwSetWindowTitle(g_app->window, title);
-        }
-        });
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init(imguiGlslVersion);
 
     clothShader = new Shader("shaders/cloth.vert", "shaders/cloth.frag");
     flashShader = new Shader("shaders/flash.vert", "shaders/flash.frag");
@@ -223,7 +264,7 @@ void App::run()
         processInput(dt);
 
         // 드래그 (freeze 중에는 차단)
-        if (freezeTimer <= 0.0f && dragging && !enteringPrompt)
+        if (freezeTimer <= 0.0f && dragging)
         {
             double mx, my; glfwGetCursorPos(window, &mx, &my);
             glm::vec3 p = screenToWorldOnPlane(mx, my, 0.0f);
@@ -310,7 +351,7 @@ void App::run()
         glBindVertexArray(gizmoVAO);
 
         // 색상 규칙: 고정(빨강) > 드래그 중(노랑) > 비고정(흰색)
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 4; i++) {
             int idx = cornerIdx[i];
 
             bool fixed = cloth.isParticleFixed(idx);
@@ -345,9 +386,46 @@ void App::run()
             glEnable(GL_DEPTH_TEST);
         }
 
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        if (imguiEnabled)
+        {
+            ImGui::Begin("Pattern Prompt Builder");
+
+            static char promptBuf[1024] = "";
+            static char negBuf[512] = "";
+
+            ImGui::TextUnformatted("Prompt");
+            ImGui::InputTextMultiline("##prompt", promptBuf, IM_ARRAYSIZE(promptBuf),
+                ImVec2(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeight() * 8),
+                ImGuiInputTextFlags_AllowTabInput);
+
+            ImGui::TextUnformatted("Negative Prompt");
+            ImGui::InputTextMultiline("##negprompt", negBuf, IM_ARRAYSIZE(negBuf),
+                ImVec2(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeight() * 4),
+                ImGuiInputTextFlags_AllowTabInput);
+
+            if (ImGui::Button("Run Pattern Generation")) {
+                g_app->generateAndLoadTextureFromPrompt(promptBuf, negBuf);
+            }
+
+            ImGui::End();
+        }
+
+        ImGui::Render();
+        glDisable(GL_DEPTH_TEST);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        glEnable(GL_DEPTH_TEST);
+
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     // 리소스 정리
     if (clothTex) glDeleteTextures(1, &clothTex);
@@ -360,161 +438,80 @@ void App::run()
     glfwTerminate();
 }
 
-void App::generateAndLoadTextureFromPrompt(const std::string& prompt)
+void App::generateAndLoadTextureFromPrompt(const std::string& prompt,
+    const std::string& negative)
 {
     if (prompt.empty()) {
-        std::cout << "No prompt Aborting texture generation\n";
+        std::cout << "No prompt. Aborting texture generation\n";
         return;
     }
 
-    // venv 파이썬 우선
+    // venv 우선
     std::filesystem::path venvPy = std::filesystem::path("venv") / "Scripts" / "python.exe";
     std::string py = std::filesystem::exists(venvPy) ? venvPy.string() : "python";
 
-    // 스크립트/출력 경로
     std::filesystem::path script = "gen_pattern.py";
     std::filesystem::path out = std::filesystem::path("textures") / "generated.png";
     if (!std::filesystem::exists(script)) {
-        std::cerr << "Failed to find gen_pattern.py. Please check your working directory\n";
+        std::cerr << "Failed to find gen_pattern.py. Check working directory.\n";
         return;
     }
     std::filesystem::create_directories(out.parent_path());
 
-    // 따옴표 안전 처리
-    auto sanitize = [](std::string s) { for (auto& ch : s) if (ch == '\"') ch = '\''; return s; };
-    std::string p = sanitize(prompt);
+    auto sanitize = [](std::string s) {
+        for (auto& ch : s) {
+            if (ch == '\"') ch = '\'';    // 큰따옴표 -> 작은따옴표
+            if (ch == '\r' || ch == '\n' || ch == '\t') ch = ' ';
+        }
 
-    // PSD 무이음 + 평면화 후처리 + RGB 저장
+        while (!s.empty() && s.back() == '\\') s.pop_back();
+        return s;
+        };
+
+    std::string p = sanitize(prompt);
+    std::string n = sanitize(negative);
+
+    // 명령 구성
     std::string cmd =
         "cmd /C chcp 65001 >NUL & "
         "\"" + py + "\" "
         "\"" + script.string() + "\" "
         "\"" + p + "\" "
-        "--seamless-psd --rgb "
-        "--out \"" + out.string() + "\" 2>&1";
+        "--seamless-psd --rgb ";
+
+    if (!n.empty()) {
+        cmd += "--neg \"" + n + "\" ";
+    }
+
+    cmd += "--out \"" + out.string() + "\" 2>&1";
 
     std::cout << "명령 실행: " << cmd << "\n";
     int rc = std::system(cmd.c_str());
     if (rc != 0) {
-        std::cerr << "Python script execution failed (" << rc << "). Check PATH/venv/options/modules\n";
+        std::cerr << "[Error] Python script execution failed (" << rc << ")\n";
         return;
     }
 
-    // 텍스처 교체 + 최근 프롬프트 저장
     reloadTexture(out.string());
     lastPrompt = prompt;
+    lastNegPrompt = negative;
     std::cout << "Successfully loaded new texture\n";
 }
 
 
 void App::processInput(float dt)
 {
-    // ----- ESC 에지 검출 -----
-    int  escKey = glfwGetKey(window, GLFW_KEY_ESCAPE);
-    bool escEdge = (escKey == GLFW_PRESS) && (prevEscKey == GLFW_RELEASE);
-
-    // ----- 프롬프트 입력 모드 토글(I) -----
-    bool nowI = (glfwGetKey(window, GLFW_KEY_I) == GLFW_PRESS);
-    if (nowI && !prevI) {
-        if (!enteringPrompt) {
-            enteringPrompt = true;
-            promptBuffer.clear();
-            // 드래그 등 상호작용 끄기
-            dragging = false; dragAnchor = -1; dragCorner = -1; dragMode = DragMode::None;
-
-            char title[512];
-            std::snprintf(title, sizeof(title),
-                "Cloth Simulator  |  Prompt:  (Enter=Generate, Esc=Cancel, Ctrl+V=Paste)");
-            glfwSetWindowTitle(window, title);
-        }
-    }
-    prevI = nowI;
-
-    // ----- 입력 모드 처리 -----
-    if (enteringPrompt) {
-        int  enterKey = glfwGetKey(window, GLFW_KEY_ENTER);
-        bool enterEdge = (enterKey == GLFW_PRESS) && (!prevEnter);
-
-        int  bsKey = glfwGetKey(window, GLFW_KEY_BACKSPACE);
-        bool bsEdge = (bsKey == GLFW_PRESS) && (!prevBackspace);
-
-        // 백스페이스
-        if (bsEdge) {
-            backspaceUTF8();
-            char title[512];
-            std::snprintf(title, sizeof(title),
-                "Cloth Simulator  |  Prompt: %s  (Enter=Generate, Esc=Cancel, Ctrl+V=Paste)",
-                promptBuffer.c_str());
-            glfwSetWindowTitle(window, title);
-        }
-
-        // ----- 붙여넣기: Ctrl + V -----
-        bool ctrl = (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS) ||
-            (glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS);
-        int  vKey = glfwGetKey(window, GLFW_KEY_V);
-        bool vEdge = (vKey == GLFW_PRESS) && !prevV;
-
-        if (ctrl && vEdge) {
-            const char* clip = glfwGetClipboardString(window); // UTF-8
-            if (clip) {
-                std::string s = clip;
-                for (char& c : s) if (c == '\r' || c == '\n' || c == '\t') c = ' ';
-                appendUTF8String(s);
-
-                char title[512];
-                std::snprintf(title, sizeof(title),
-                    "Cloth Simulator  |  Prompt: %s  (Enter=Generate, Esc=Cancel, Ctrl+V=Paste)",
-                    promptBuffer.c_str());
-                glfwSetWindowTitle(window, title);
-            }
-        }
-        prevV = (vKey == GLFW_PRESS);
-
-        // 엔터 = 생성
-        if (enterEdge) {
-            std::string p = promptBuffer.empty()
-                ? "seamless flat camo pattern"
-                : promptBuffer;
-            generateAndLoadTextureFromPrompt(p);
-            lastPrompt = p;
-
-            enteringPrompt = false;
-            char title[256];
-            std::snprintf(title, sizeof(title),
-                "Cloth Simulator  |  tex=%s  |  tile=%.2f",
-                currentTexPath.c_str(), texScale);
-            glfwSetWindowTitle(window, title);
-        }
-        // ESC = 입력 취소 (앱 종료로 이어지지 않게 블록)
-        else if (escEdge) {
-            enteringPrompt = false;
-            escBlockUntilRelease = true;
-
-            char title[256];
-            std::snprintf(title, sizeof(title),
-                "Cloth Simulator  |  tex=%s  |  tile=%.2f",
-                currentTexPath.c_str(), texScale);
-            glfwSetWindowTitle(window, title);
-        }
-
-        prevEnter = (enterKey == GLFW_PRESS);
-        prevBackspace = (bsKey == GLFW_PRESS);
-        prevEscKey = escKey;
-        return; // 입력 모드 중에는 다른 키 처리 차단
-    }
-    else {
-        // 입력 모드 아님: 에지 플래그 리셋
-        prevEnter = prevBackspace = false;
-        prevV = false;
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.WantCaptureKeyboard) {
+        return;
     }
 
-    // ----- 앱 종료용 ESC: 블록 중이 아니며 '새로운 눌림'일 때만 -----
-    if (!escBlockUntilRelease && escEdge) {
+    static int prevEsc = GLFW_RELEASE;
+    int escKey = glfwGetKey(window, GLFW_KEY_ESCAPE);
+    if (escKey == GLFW_PRESS && prevEsc == GLFW_RELEASE) {
         glfwSetWindowShouldClose(window, true);
     }
-    if (escBlockUntilRelease && escKey == GLFW_RELEASE) {
-        escBlockUntilRelease = false;
-    }
+    prevEsc = escKey;
 
     // ----- 이동/컨트롤 키 -----
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.ProcessKeyboard(FORWARD, dt);
@@ -527,7 +524,7 @@ void App::processInput(float dt)
     if (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS)
         cornerHitScale = std::min(3.0f, cornerHitScale + dt);
 
-    for (int k = GLFW_KEY_1; k <= GLFW_KEY_9; ++k) {
+    for (int k = GLFW_KEY_1; k <= GLFW_KEY_9; k++) {
         if (glfwGetKey(window, k) == GLFW_PRESS) {
             texScale = float(k - GLFW_KEY_0);
         }
@@ -569,21 +566,18 @@ void App::processInput(float dt)
 
     if (cG == GLFW_PRESS && pG == GLFW_RELEASE) {
         if (shift) {
+            // 파일만 리로드
             std::string gen = "textures/generated.png";
             if (std::filesystem::exists(gen)) reloadTexture(gen);
-            else std::cerr << "[Shift+G] textures/generated.png not found. Please generate the texture first\n";
+            else std::cerr << "[Shift+G] textures/generated.png not found.\n";
         }
         else {
-            std::string prompt = lastPrompt.empty()
-                ? "seamless flat camo pattern"
-                : lastPrompt;
-            generateAndLoadTextureFromPrompt(prompt);
+            // 최근 prompt/negative 재생성
+            std::string prompt = lastPrompt.empty() ? "seamless repeating pattern" : lastPrompt;
+            g_app->generateAndLoadTextureFromPrompt(prompt, lastNegPrompt);
         }
     }
     pG = cG;
-
-    // 마지막에 ESC 상태 저장
-    prevEscKey = escKey;
 }
 
 
@@ -608,47 +602,6 @@ glm::vec3 App::screenToWorldOnPlane(double sx, double sy, float planeZ)
 
     float t = (planeZ - ro.z) / denom;
     return ro + rd * t;
-}
-
-void App::appendUTF8String(const std::string& s)
-{
-    promptBuffer += s;
-}
-
-void App::appendUTF8(unsigned int cp)
-{
-    if (cp <= 0x7F) {
-        promptBuffer.push_back(static_cast<char>(cp));
-    }
-    else if (cp <= 0x7FF) {
-        promptBuffer.push_back(static_cast<char>(0xC0 | ((cp >> 6) & 0x1F)));
-        promptBuffer.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-    }
-    else if (cp <= 0xFFFF) {
-        promptBuffer.push_back(static_cast<char>(0xE0 | ((cp >> 12) & 0x0F)));
-        promptBuffer.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-        promptBuffer.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-    }
-    else {
-        promptBuffer.push_back(static_cast<char>(0xF0 | ((cp >> 18) & 0x07)));
-        promptBuffer.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
-        promptBuffer.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
-        promptBuffer.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
-    }
-}
-
-void App::backspaceUTF8()
-{
-    if (promptBuffer.empty()) return;
-    // 마지막 코드포인트의 시작 바이트를 찾는다 (10xxxxxx가 아니어야 함)
-    int i = static_cast<int>(promptBuffer.size()) - 1;
-    // 연속된 continuation 바이트(0b10xxxxxx) 스킵
-    while (i >= 0 && (static_cast<unsigned char>(promptBuffer[i]) & 0xC0) == 0x80) {
-        --i;
-    }
-    if (i >= 0) {
-        promptBuffer.erase(i);
-    }
 }
 
 void App::reloadTexture(const std::string& path)
@@ -683,4 +636,24 @@ void App::reloadTexture(const std::string& path)
     glfwSetWindowTitle(window, title);
 
     std::cout << "Texture reloaded: " << currentTexPath << "\n";
+}
+
+void App::runPatternGen(const char* prompt)
+{
+    std::string exe = "venv/Scripts/python.exe";
+    std::string script = "gen_pattern.py";
+    std::string out = "textures/generated.png";
+
+    std::ostringstream oss;
+    oss << "\"" << exe << "\" \"" << script << "\" "
+        << "\"" << prompt << "\" --out \"" << out << "\"";
+
+    int ret = std::system(oss.str().c_str());
+    if (ret == 0) {
+        // 성공하면 텍스처 리로드
+        reloadTexture(out);
+    }
+    else {
+        std::cout << "[Error] pattern gen failed" << std::endl;
+    }
 }

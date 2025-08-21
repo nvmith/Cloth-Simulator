@@ -56,56 +56,44 @@ def flatten_to_albedo(img: Image.Image, colors: int = 8, dither: bool = False, b
         out = out.filter(ImageFilter.GaussianBlur(blur))
     return out
 
+# ------------------- CLIP 77-token safe truncate -------------------
+def clip_truncate(pipe, text: str) -> str:
+    tok = pipe.tokenizer
+    enc = tok(text, truncation=True, max_length=77,
+              add_special_tokens=True, return_overflowing_tokens=False)
+    trimmed = tok.decode(enc["input_ids"], skip_special_tokens=True)
+    return " ".join(trimmed.split())
+
 # ------------------- 메인 -------------------
 def main():
-    # ‘알베도/베이스컬러’ 지향 기본 스타일 (구김/음영 금지)
     DEFAULT_STYLE = (
-        "seamless, repeating, tileable, clean vector style, flat background, "
-        "albedo/basecolor texture, allow subtle inner shading, "
-        "no global lighting, no drop shadow, no bevel/emboss, no vignette, "
-        "crisp clean edges"
+        ""
     )
     BASE_FALLBACK = (
-        "seamless repeating tileable flat pattern, vector style, "
-        "albedo/basecolor texture, no shading, no highlights, no shadows, no lighting"
+        ""
     )
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("prompt", nargs="*", default=[], help="사용자 프롬프트(예: 'blue camo')")
-    ap.add_argument("--model", default="sd-legacy/stable-diffusion-v1-5", help="허깅페이스 모델 id")
-
-    # 네가 되돌린 기본값: 1024 / 30
-    ap.add_argument("--size", type=int, default=1024, help="정사각 크기(px)")
-    ap.add_argument("--steps", type=int, default=30, help="샘플링 스텝")
-    ap.add_argument("--guidance", type=float, default=6.8, help="guidance scale (플랫 스타일엔 6~7 권장)")
-    ap.add_argument("--seed", type=int, default=None, help="랜덤 시드")
-
-    # 무이음 옵션
-    ap.add_argument("--seamless", action="store_true", help="간이 무이음 후처리")
-    ap.add_argument("--seamless-psd", action="store_true", help="고급 무이음(PSD) 후처리")
-
-    # 평면화 후처리
-    ap.add_argument("--flat-post", action="store_true", help="후처리: 평면 알베도화(팔레트 양자화)")
-    ap.add_argument("--flat-colors", type=int, default=8, help="평면화 색상 수(4~12 권장)")
-    ap.add_argument("--flat-dither", action="store_true", help="디더링 사용(기본 off)")
-
-    # 저장/색상
-    ap.add_argument("--rgb", action="store_true", help="알파 제거(RGB로 저장)")
-    ap.add_argument("--out", default="textures/generated.png", help="출력 경로")
-
-    # 자동 스타일 부착 / 네거티브 프롬프트
-    ap.add_argument("--style", default=DEFAULT_STYLE, help="사용자 프롬프트 뒤에 자동으로 붙일 스타일 문자열")
-    ap.add_argument("--style-off", action="store_true", help="자동 스타일 부착 끄기")
-    ap.add_argument(
-    "--neg",
-    default=(
+    ap.add_argument("prompt", nargs="*", default=[], help="사용자 프롬프트")
+    ap.add_argument("--model", default="sd-legacy/stable-diffusion-v1-5")
+    ap.add_argument("--size", type=int, default=1024)
+    ap.add_argument("--steps", type=int, default=30)
+    ap.add_argument("--guidance", type=float, default=6.8)
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--seamless", action="store_true")
+    ap.add_argument("--seamless-psd", action="store_true")
+    ap.add_argument("--flat-post", action="store_true")
+    ap.add_argument("--flat-colors", type=int, default=8)
+    ap.add_argument("--flat-dither", action="store_true")
+    ap.add_argument("--rgb", action="store_true")
+    ap.add_argument("--out", default="textures/generated.png")
+    ap.add_argument("--style", default=DEFAULT_STYLE)
+    ap.add_argument("--style-off", action="store_true")
+    ap.add_argument("--neg", default=(
         "photorealistic, 3d, global lighting, drop shadow, outer glow, highlights, "
         "bevel, emboss, vignette, reflection, normal map, bump, displacement, "
         "noisy, blur, text, logo, watermark"
-    ),
-    help="negative prompt",
-)
-
+    ))
     args = ap.parse_args()
 
     user = " ".join(args.prompt).strip()
@@ -123,7 +111,7 @@ def main():
     pipe.enable_attention_slicing()
     pipe.enable_vae_slicing()
     try:
-        import xformers  # noqa: F401
+        import xformers
         pipe.enable_xformers_memory_efficient_attention()
     except Exception:
         pass
@@ -135,6 +123,10 @@ def main():
     generator = None
     if args.seed is not None:
         generator = torch.Generator(device=device).manual_seed(args.seed)
+
+    # --- 여기서 토큰 잘라줌 ---
+    final_prompt = clip_truncate(pipe, final_prompt)
+    args.neg     = clip_truncate(pipe, args.neg)
 
     # 생성 (OOM 시 768 폴백)
     try:
@@ -174,8 +166,8 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     img.save(args.out)
     print(f"✅ Saved: {args.out}")
-    print(f"🎯 Prompt used: {final_prompt}")
-    print(f"🙅 Negative: {args.neg}")
+    print(f"🎯 Prompt used (<=77t): {final_prompt}")
+    print(f"🙅 Negative (<=77t): {args.neg}")
 
 if __name__ == "__main__":
     main()
