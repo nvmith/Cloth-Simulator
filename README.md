@@ -80,13 +80,6 @@ Verlet 통합으로 실시간 거동을 구현하고, 메시/텍스처/내보내
   - `--rgb` : 알파 제거 후 RGB 저장  
   - `--steps / --guidance / --seed / --size` : 샘플링/해상도 제어  
 - 출력: 기본 `textures/generated.png`  
-- 콘솔 실행 예:
-  ```bash
-  venv\Scripts\python.exe gen_pattern.py ^
-    "seamless camouflage pattern made of cat silhouettes, flat solid fill colors: yellow, sky blue, hot pink, tileable" ^
-    --neg "gradient, shading, texture, lighting, photorealistic" ^
-    --style-off --seamless-psd --flat-post --flat-colors 3 --rgb
-  ```
 
 ---
 
