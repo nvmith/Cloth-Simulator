@@ -318,6 +318,22 @@ void Cloth::drawTriangles()
     glBindVertexArray(0);
 }
 
+void Cloth::applyRadialImpulse(const glm::vec3& center, const glm::vec3& dir, float strength, float radius)
+{
+    const float rInv = (radius > 0.f) ? 1.0f / radius : 0.f;
+
+    for (auto& p : particles) {
+        if (p.isFixed) continue;
+
+        float dist = glm::length(p.pos - center);
+        if (dist < radius) {
+            float falloff = 1.0f - dist * rInv;
+            glm::vec3 dv = glm::normalize(dir) * (strength * falloff);
+            p.prevPos -= dv;
+        }
+    }
+}
+
 // 파티클 그리드 초기화
 void Cloth::initParticles()
 {

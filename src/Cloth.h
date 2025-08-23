@@ -144,6 +144,10 @@ public:
         particles[R].isFixed = true;
     }
 
+    void applyRadialImpulse(const glm::vec3& center,
+        const glm::vec3& dir,
+        float strength, float radius);
+
 private:
     // 그리드 정보
     int numWidth;

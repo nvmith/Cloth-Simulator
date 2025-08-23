@@ -506,6 +506,26 @@ void App::processInput(float dt)
         return;
     }
 
+    int rightNow = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+    bool clicked = (rightNow == GLFW_PRESS) && !rightDownPrev;
+    rightDownPrev = (rightNow == GLFW_PRESS);
+
+    if (clicked && freezeTimer <= 0.0f) {
+        // 클릭 지점(이미 드래그에서 쓰던 함수 재사용)
+        double mx, my; glfwGetCursorPos(window, &mx, &my);
+        glm::vec3 hit = screenToWorldOnPlane(mx, my, 0.0f);
+
+        // 카메라 → 히트 방향
+        glm::vec3 camPos = glm::vec3(glm::inverse(camera.GetViewMatrix())[3]);
+        glm::vec3 dir = glm::normalize(hit - camPos);
+
+        // 튜닝 파라미터
+        float impulseStrength = 0.6f;
+        float impulseRadius = 2.0f;
+
+        cloth.applyRadialImpulse(hit, dir, impulseStrength, impulseRadius);
+    }
+
     static int prevEsc = GLFW_RELEASE;
     int escKey = glfwGetKey(window, GLFW_KEY_ESCAPE);
     if (escKey == GLFW_PRESS && prevEsc == GLFW_RELEASE) {

@@ -76,4 +76,6 @@ private:
     const char* imguiGlslVersion = "#version 330"; // OpenGL 3.3 core
 
     void runPatternGen(const char* prompt);
+
+    bool rightDownPrev = false;
 };
