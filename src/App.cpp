@@ -198,20 +198,22 @@ bool App::init()
                 bool fixed = cloth.isParticleFixed(idx);
                 if (fixed)
                 {
-                    // 고정 해제: 드래그는 계속 유지 (사용자가 바로 이어서 끌 수 있게)
                     cloth.setParticleFixed(idx, false);
                 }
                 else
                 {
-                    // 고정 ON: "현재 위치"에서 고정 (스냅 안 함)
                     cloth.setParticleFixed(idx, true);
-
-                    // 고정되면 드래그 종료(고정점은 더 못 끌게)
-                    g_app->dragging = false;
-                    g_app->dragAnchor = -1;
-                    g_app->dragCorner = -1;
-                    g_app->dragMode = App::DragMode::None;
                 }
+            }
+        }
+        else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) 
+        {
+            if (g_app->dragMode == App::DragMode::Corner && cloth.isParticleFixed(g_app->dragCorner)) 
+            {
+                g_app->dragging = false;
+                g_app->dragAnchor = -1;
+                g_app->dragCorner = -1;
+                g_app->dragMode = App::DragMode::None;
             }
         }
         });
@@ -510,12 +512,11 @@ void App::processInput(float dt)
     bool clicked = (rightNow == GLFW_PRESS) && !rightDownPrev;
     rightDownPrev = (rightNow == GLFW_PRESS);
 
-    if (clicked && freezeTimer <= 0.0f) {
-        // 클릭 지점(이미 드래그에서 쓰던 함수 재사용)
+    if (clicked && freezeTimer <= 0.0f && !dragging) {
         double mx, my; glfwGetCursorPos(window, &mx, &my);
         glm::vec3 hit = screenToWorldOnPlane(mx, my, 0.0f);
 
-        // 카메라 → 히트 방향
+        // 카메라 -> 히트 방향
         glm::vec3 camPos = glm::vec3(glm::inverse(camera.GetViewMatrix())[3]);
         glm::vec3 dir = glm::normalize(hit - camPos);
 

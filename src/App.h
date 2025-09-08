@@ -78,4 +78,6 @@ private:
     void runPatternGen(const char* prompt);
 
     bool rightDownPrev = false;
+
+    bool suppressRightClickWind = false;
 };
