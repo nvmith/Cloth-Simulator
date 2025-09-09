@@ -20,50 +20,6 @@ App::App(int width, int height)
     g_app = this;
 }
 
-struct PatternPreset {
-    const char* label;   // 드롭다운에 보일 이름
-    const char* seed;    // 프롬프트에 들어갈 패턴 묘사
-};
-
-static PatternPreset kPatternPresets[] = {
-    {"Camo (classic)",        "camouflage pattern, irregular organic blobs"},
-    {"Camo (digital)",        "digital camo pattern, pixelated square blotches"},
-    {"Check (checkerboard)",  "checkerboard check pattern, high-contrast squares"},
-    {"Check (gingham)",       "gingham check pattern, small even checks"},
-    {"Check (buffalo)",       "buffalo check pattern, large bold checks"},
-    {"Plaid / Tartan",        "plaid tartan pattern, crossing stripes"},
-    {"Houndstooth",           "houndstooth pattern, broken checks"},
-    {"Windowpane",            "windowpane check pattern, thin grid lines"},
-    {"Argyle",                "argyle diamond pattern"},
-    {"Stripes (vertical)",    "vertical striped pattern, parallel lines"},
-    {"Stripes (horizontal)",  "horizontal striped pattern, parallel lines"},
-    {"Stripes (diagonal)",    "diagonal striped pattern, slanted lines"},
-    {"Pinstripe",             "pinstripe pattern, ultra thin stripes"},
-    {"Polka dot",             "polka dot pattern, round dots"},
-    {"Chevron",               "chevron zigzag pattern"},
-    {"Herringbone",           "herringbone pattern, V-shaped twill"},
-    {"Geometric tessellation","geometric tessellation pattern, repeating tiles"},
-    {"Paisley",               "paisley pattern, teardrop motifs"},
-    {"Damask",                "damask ornamental pattern, symmetric flourishes"},
-    {"Animal (leopard)",      "leopard print pattern, rosettes"},
-    {"Animal (zebra)",        "zebra print pattern, high-contrast stripes"},
-    {"Animal (snakeskin)",    "snakeskin scale pattern"}
-};
-
-static const char* kDensityLabels[] = { "Sparse", "Medium", "Dense" };
-static const char* kDensityWords[] = {
-    "sparse, spaced out motifs, large negative space",   // 배경 많이 보이게
-    "balanced density, evenly spaced",                   // 중간
-    "dense coverage, tighter spacing"                    // 빽빽
-};
-
-static const char* kDistributionLabels[] = { "Scattered", "Grid-aligned", "Random jittered" };
-static const char* kDistributionWords[] = {
-    "scattered, non-overlapping, evenly spaced",
-    "grid-aligned, uniform spacing, non-overlapping",
-    "randomized jitter, separated, non-overlapping"
-};
-
 unsigned int App::loadTexture2D(const char* path, bool srgb)
 {
     int w, h, comp;
@@ -397,17 +353,69 @@ void App::run()
             ImGui::Begin("Pattern Prompt Builder");
 
             static char promptBuf[1024] = "";
-            static char negBuf[512] = "";
+            static char negBuf[1024] = "";
 
+            auto CountUtf8Codepoints = [](const char* s) {
+                int count = 0;
+                const unsigned char* p = (const unsigned char*)s;
+                while (*p) { if ((*p & 0xC0) != 0x80) ++count; ++p; }
+                return count;
+                };
+
+            // ---------- Prompt ----------
             ImGui::TextUnformatted("Prompt");
             ImGui::InputTextMultiline("##prompt", promptBuf, IM_ARRAYSIZE(promptBuf),
                 ImVec2(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeight() * 8),
                 ImGuiInputTextFlags_AllowTabInput);
 
+            {
+                const int maxBytes = IM_ARRAYSIZE(promptBuf) - 1;
+                const int curBytes = (int)strlen(promptBuf);
+                const int curChars = CountUtf8Codepoints(promptBuf);
+
+                float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+                char counter[128];
+                snprintf(counter, sizeof(counter), "%d chars %d / %d bytes", curChars, curBytes, maxBytes);
+
+                ImVec4 col = (curBytes >= maxBytes) ? ImVec4(1, 0.3f, 0.3f, 1)
+                    : (curBytes > (int)(maxBytes * 0.9f)) ? ImVec4(1, 0.7f, 0.2f, 1)
+                    : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+                ImVec2 sz = ImGui::CalcTextSize(counter);
+                ImGui::SetCursorPosX(right - sz.x);
+                ImGui::PushStyleColor(ImGuiCol_Text, col);
+                ImGui::TextUnformatted(counter);
+                ImGui::PopStyleColor();
+
+                ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::Separator();
+
+            // ---------- Negative Prompt ----------
             ImGui::TextUnformatted("Negative Prompt");
             ImGui::InputTextMultiline("##negprompt", negBuf, IM_ARRAYSIZE(negBuf),
                 ImVec2(ImGui::GetContentRegionAvail().x, ImGui::GetTextLineHeight() * 4),
                 ImGuiInputTextFlags_AllowTabInput);
+
+            {
+                const int maxBytes = IM_ARRAYSIZE(negBuf) - 1;
+                const int curBytes = (int)strlen(negBuf);
+                const int curChars = CountUtf8Codepoints(negBuf);
+
+                float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+                char counter[128];
+                snprintf(counter, sizeof(counter), "%d chars %d / %d bytes", curChars, curBytes, maxBytes);
+
+                ImVec4 col = (curBytes >= maxBytes) ? ImVec4(1, 0.3f, 0.3f, 1)
+                    : (curBytes > (int)(maxBytes * 0.9f)) ? ImVec4(1, 0.7f, 0.2f, 1)
+                    : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+                ImVec2 sz = ImGui::CalcTextSize(counter);
+                ImGui::SetCursorPosX(right - sz.x);
+                ImGui::PushStyleColor(ImGuiCol_Text, col);
+                ImGui::TextUnformatted(counter);
+                ImGui::PopStyleColor();
+            }
 
             if (ImGui::Button("Run Pattern Generation")) {
                 g_app->generateAndLoadTextureFromPrompt(promptBuf, negBuf);
@@ -415,6 +423,7 @@ void App::run()
 
             ImGui::End();
         }
+
 
         ImGui::Render();
         glDisable(GL_DEPTH_TEST);
