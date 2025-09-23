@@ -51,7 +51,8 @@ Verlet 통합으로 실시간 거동을 구현하고, 메시/텍스처/내보내
 ---
 
 ### 📷 실행 예시
-<img width="642" height="383" alt="Image" src="https://github.com/user-attachments/assets/7e11309a-94ee-457f-8d6d-4d6e66d8b2f1" />
+<img width="642" height="383" alt="Image" src="https://github.com/user-attachments/assets/7e11309a-94ee-457f-8d6d-4d6e66d8b2f1" /> <br>
+![Image](https://github.com/user-attachments/assets/1acb8c21-573e-484e-8009-aa0822d1d23c)
 
 ---
 
