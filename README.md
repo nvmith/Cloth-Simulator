@@ -53,6 +53,18 @@ Rigidbody 같은 엔진 제공 컴포넌트를 쓰는 대신, **질점–스프�
 
 ---
 
+## 📷 실행 화면
+
+| 패턴 반복 횟수 변경 기능 | 임펄스 기능 |
+|:--:|:--:|
+| ![Image](https://github.com/user-attachments/assets/6fbfcb58-7918-4726-a340-0fac24ff8f2d) | ![Image](https://github.com/user-attachments/assets/7c43d6cf-8c39-48b6-9f57-d325d11bb11f) |
+
+| 고정핀 기능 | OBJ/MTL 출력 기능 |
+|:--:|:--:|
+| ![Image](https://github.com/user-attachments/assets/9bc45af1-66f8-4239-b0c5-940acbad0db3) | ![Image](https://github.com/user-attachments/assets/0a66d1f6-6fbb-4561-986e-87d7a257d49d) |
+
+---
+
 ## 🖼️ 텍스처 & 패턴 워크플로
 - 텍스처는 `textures/`에 배치 (예: `textures/blue_camo_pattern.png`)  
 - 셰이더 `uTexScale`로 타일 반복(1~9)  
