@@ -65,7 +65,7 @@ Rigidbody 같은 엔진 제공 컴포넌트를 쓰는 대신, **질점–스프�
 
 ---
 
-## 🖼️ 텍스처 & 패턴 워크플로
+## 🖼️ 텍스처 & 패턴 워크플로우
 - 텍스처는 `textures/`에 배치 (예: `textures/blue_camo_pattern.png`)  
 - 셰이더 `uTexScale`로 타일 반복(1~9)  
 - **ImGui - Pattern Prompt Builder**
